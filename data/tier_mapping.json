@@ -1,0 +1,11 @@
+[
+  { "tier_code": "welcome", "tier_id": 1, "tier_name": "Welcome", "tier_group_id": 1 },
+  { "tier_code": "living", "tier_id": 2, "tier_name": "Living", "tier_group_id": 1 },
+  { "tier_code": "life", "tier_id": 3, "tier_name": "Life", "tier_group_id": 1 },
+  { "tier_code": "sublime", "tier_id": 4, "tier_name": "Sublime", "tier_group_id": 1 },
+  { "tier_code": "superior", "tier_id": 5, "tier_name": "Superior", "tier_group_id": 1 },
+  { "tier_code": "staff1", "tier_id": 6, "tier_name": "Staff1", "tier_group_id": 2 },
+  { "tier_code": "staff2", "tier_id": 7, "tier_name": "Staff2", "tier_group_id": 2 },
+  { "tier_code": "staff3", "tier_id": 8, "tier_name": "Staff3", "tier_group_id": 2 },
+  { "tier_code": "staff4", "tier_id": 9, "tier_name": "Staff4", "tier_group_id": 2 }
+]

@@ -1,0 +1,4 @@
+[
+  { "tier_group_id": 1, "tier_group_name": "customer" },
+  { "tier_group_id": 2, "tier_group_name": "employee" }
+]
