@@ -157,44 +157,159 @@ function StatCard({ label, value }: { label: string; value: string }) {
   );
 }
 
+/**
+ * Real download progress — every state comes from the actual request:
+ * "preparing" lasts until the server answers (it builds the whole file before responding),
+ * "downloading" counts the bytes actually received against Content-Length.
+ */
+type DownloadState =
+  | { phase: "idle" }
+  | { phase: "preparing"; startedAt: number }
+  | { phase: "downloading"; loaded: number; total: number | null }
+  | { phase: "error"; message: string };
+
+function filenameFromDisposition(header: string | null, fallback: string): string {
+  const match = header?.match(/filename="?([^";]+)"?/);
+  return match?.[1] ?? fallback;
+}
+
+async function downloadFile(url: string, fallbackName: string, onState: (s: DownloadState) => void) {
+  onState({ phase: "preparing", startedAt: Date.now() });
+  try {
+    const res = await fetch(url);
+    if (!res.ok || !res.body) {
+      const body = await res.json().catch(() => null);
+      throw new Error(body?.error ?? `Request failed (${res.status})`);
+    }
+
+    const totalHeader = Number(res.headers.get("Content-Length"));
+    const total = totalHeader > 0 ? totalHeader : null;
+    const reader = res.body.getReader();
+    const chunks: Uint8Array<ArrayBuffer>[] = [];
+    let loaded = 0;
+    onState({ phase: "downloading", loaded, total });
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      chunks.push(value);
+      loaded += value.length;
+      onState({ phase: "downloading", loaded, total });
+    }
+
+    const blob = new Blob(chunks, { type: res.headers.get("Content-Type") ?? "application/octet-stream" });
+    const objectUrl = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = objectUrl;
+    a.download = filenameFromDisposition(res.headers.get("Content-Disposition"), fallbackName);
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(objectUrl), 10_000);
+    onState({ phase: "idle" });
+  } catch (err) {
+    onState({ phase: "error", message: err instanceof Error ? err.message : "Download failed" });
+  }
+}
+
+function formatMb(bytes: number): string {
+  return (bytes / 1_000_000).toFixed(bytes < 10_000_000 ? 1 : 0);
+}
+
+/** Label for a download button: real elapsed time while the server works, real MB while receiving. */
+function DownloadLabel({ state, idle, now }: { state: DownloadState; idle: string; now: number }) {
+  if (state.phase === "preparing") {
+    const secs = Math.max(0, Math.floor((now - state.startedAt) / 1000));
+    return (
+      <span className="flex items-center gap-1.5">
+        <Spinner /> กำลังเตรียมไฟล์… {secs} วิ
+      </span>
+    );
+  }
+  if (state.phase === "downloading") {
+    const pct = state.total ? Math.floor((state.loaded / state.total) * 100) : null;
+    return (
+      <span className="flex items-center gap-1.5">
+        <Spinner /> กำลังดาวน์โหลด {formatMb(state.loaded)}
+        {state.total ? ` / ${formatMb(state.total)} MB (${pct}%)` : " MB"}
+      </span>
+    );
+  }
+  return <>{idle}</>;
+}
+
+function Spinner() {
+  return <span className="h-3 w-3 animate-spin rounded-full border-2 border-current border-t-transparent" aria-hidden />;
+}
+
 export default function Home() {
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(50);
   const [tier, setTier] = useState("");
   const [result, setResult] = useState<MembersResponse | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  // `loading` is derived: we're loading whenever the latest settled request
+  // doesn't match the current filters, so the effect never sets state synchronously.
+  const requestKey = `${page}|${pageSize}|${tier}`;
+  const [settledKey, setSettledKey] = useState<string | null>(null);
+  const loading = settledKey !== requestKey;
+  const [fetchError, setFetchError] = useState<string | null>(null);
+  const error = loading ? null : fetchError;
 
   const [exportOpen, setExportOpen] = useState(false);
   const [exportStartDate, setExportStartDate] = useState("");
   const [exportEndDate, setExportEndDate] = useState("");
   const [exportTier, setExportTier] = useState("");
+  // Blank = export everyone matching the filters; otherwise cap at N people.
+  const [exportLimit, setExportLimit] = useState("");
+  // Which end of the register_date timeline to take from: earliest registrants or most recent.
+  const [exportOrder, setExportOrder] = useState<"asc" | "desc">("desc");
+  const exportLimitValid = exportLimit === "" || (/^\d+$/.test(exportLimit) && Number(exportLimit) > 0);
   const [exportSummary, setExportSummary] = useState<{ total: number; valid: number; needsReview: number } | null>(
     null
   );
   const [exportSummaryLoading, setExportSummaryLoading] = useState(false);
   const [exportSummaryError, setExportSummaryError] = useState<string | null>(null);
 
+  const [zipDownload, setZipDownload] = useState<DownloadState>({ phase: "idle" });
+  const [reviewDownload, setReviewDownload] = useState<DownloadState>({ phase: "idle" });
+  const downloadBusy = (s: DownloadState) => s.phase === "preparing" || s.phase === "downloading";
+  const anyDownloadBusy = downloadBusy(zipDownload) || downloadBusy(reviewDownload);
+  // Ticks once a second only while a server is preparing a file, to show the real elapsed time.
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    if (zipDownload.phase !== "preparing" && reviewDownload.phase !== "preparing") return;
+    const id = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(id);
+  }, [zipDownload.phase, reviewDownload.phase]);
+
+  function startDownload(url: string, fallbackName: string, setState: (s: DownloadState) => void) {
+    setNow(Date.now());
+    void downloadFile(url, fallbackName, setState);
+  }
+
   function handleExportStartDateChange(value: string) {
     setExportStartDate(value);
     if (exportEndDate && value && exportEndDate < value) setExportEndDate(value);
   }
 
+  const exportQuery = (() => {
+    const params = new URLSearchParams({ order: exportOrder });
+    if (exportStartDate) params.set("startDate", exportStartDate);
+    if (exportEndDate) params.set("endDate", exportEndDate);
+    if (exportTier) params.set("tier", exportTier);
+    if (exportLimit) params.set("limit", exportLimit);
+    return params.toString();
+  })();
+
   useEffect(() => {
-    if (!exportOpen || !exportStartDate || !exportEndDate) {
-      setExportSummary(null);
-      return;
-    }
+    // The summary panel is only rendered when the limit is valid, so there's nothing to reset here.
+    if (!exportOpen || !exportLimitValid) return;
 
     const controller = new AbortController();
     const timeout = setTimeout(() => {
       setExportSummaryLoading(true);
       setExportSummaryError(null);
 
-      const params = new URLSearchParams({ startDate: exportStartDate, endDate: exportEndDate });
-      if (exportTier) params.set("tier", exportTier);
-
-      fetch(`/api/export/summary?${params.toString()}`, { signal: controller.signal })
+      fetch(`/api/export/summary?${exportQuery}`, { signal: controller.signal })
         .then((res) => {
           if (!res.ok) throw new Error(`Request failed (${res.status})`);
           return res.json();
@@ -210,12 +325,10 @@ export default function Home() {
       clearTimeout(timeout);
       controller.abort();
     };
-  }, [exportOpen, exportStartDate, exportEndDate, exportTier]);
+  }, [exportOpen, exportQuery, exportLimitValid]);
 
   useEffect(() => {
     const controller = new AbortController();
-    setLoading(true);
-    setError(null);
 
     const params = new URLSearchParams({ page: String(page), pageSize: String(pageSize) });
     if (tier) params.set("tier", tier);
@@ -225,14 +338,19 @@ export default function Home() {
         if (!res.ok) throw new Error(`Request failed (${res.status})`);
         return res.json();
       })
-      .then((data: MembersResponse) => setResult(data))
-      .catch((err) => {
-        if (err.name !== "AbortError") setError(err.message ?? "Failed to load");
+      .then((data: MembersResponse) => {
+        setResult(data);
+        setFetchError(null);
+        setSettledKey(requestKey);
       })
-      .finally(() => setLoading(false));
+      .catch((err) => {
+        if (err.name === "AbortError") return;
+        setFetchError(err.message ?? "Failed to load");
+        setSettledKey(requestKey);
+      });
 
     return () => controller.abort();
-  }, [page, pageSize, tier]);
+  }, [page, pageSize, tier, requestKey]);
 
   const pagination = result?.pagination;
   const rangeStart = pagination ? (pagination.page - 1) * pagination.pageSize + 1 : 0;
@@ -280,7 +398,8 @@ export default function Home() {
                 <div>
                   <h2 className="text-base font-semibold text-zinc-900 dark:text-zinc-100">Export to PRIMO template</h2>
                   <p className="mt-1 text-xs text-zinc-500 dark:text-zinc-400">
-                    กรองตามวันที่สมัคร (register date) — ผลลัพธ์เป็น .zip ที่มี 2 ไฟล์: แบบ PRIMO template
+                    ใส่จำนวนคนแล้วเลือกว่าจะเอาคนที่สมัครล่าสุดหรือสมัครก่อน (ตาม register date) — วันที่ไม่บังคับ
+                    ผลลัพธ์เป็น .zip ที่มี 2 ไฟล์: แบบ PRIMO template
                     (map สำเร็จ) และไฟล์ที่ต้องตรวจสอบ (address/tier ไม่ match)
                   </p>
                 </div>
@@ -296,7 +415,41 @@ export default function Home() {
               <div className="mt-4 flex flex-col gap-3">
                 <div className="flex gap-3">
                   <label className="flex flex-1 flex-col gap-1 text-sm text-zinc-600 dark:text-zinc-300">
-                    วันที่เริ่ม
+                    จำนวนคน
+                    <input
+                      type="number"
+                      inputMode="numeric"
+                      min={1}
+                      step={1}
+                      placeholder="ทั้งหมด"
+                      value={exportLimit}
+                      onChange={(e) => setExportLimit(e.target.value.trim())}
+                      className={`w-full rounded-lg border bg-white px-2.5 py-1.5 text-sm dark:bg-zinc-950 ${
+                        exportLimitValid ? "border-zinc-300 dark:border-zinc-700" : "border-red-400 dark:border-red-500"
+                      }`}
+                    />
+                  </label>
+                  <label className="flex flex-1 flex-col gap-1 text-sm text-zinc-600 dark:text-zinc-300">
+                    เรียงจาก
+                    <select
+                      value={exportOrder}
+                      onChange={(e) => setExportOrder(e.target.value as "asc" | "desc")}
+                      className="w-full rounded-lg border border-zinc-300 bg-white px-2.5 py-1.5 text-sm dark:border-zinc-700 dark:bg-zinc-950"
+                    >
+                      <option value="desc">สมัครล่าสุดก่อน</option>
+                      <option value="asc">สมัครก่อน (คนแรก)</option>
+                    </select>
+                  </label>
+                </div>
+                <span className={`-mt-1.5 text-xs ${exportLimitValid ? "text-zinc-400 dark:text-zinc-500" : "text-red-600 dark:text-red-400"}`}>
+                  {exportLimitValid
+                    ? "เว้นว่างเพื่อ export ทุกคน — คนที่ไม่มีวันที่สมัครจะอยู่ท้ายสุดเสมอ"
+                    : "กรุณาใส่จำนวนเต็มที่มากกว่า 0"}
+                </span>
+
+                <div className="flex gap-3">
+                  <label className="flex flex-1 flex-col gap-1 text-sm text-zinc-600 dark:text-zinc-300">
+                    วันที่เริ่ม (ไม่บังคับ)
                     <input
                       type="date"
                       value={exportStartDate}
@@ -305,7 +458,7 @@ export default function Home() {
                     />
                   </label>
                   <label className="flex flex-1 flex-col gap-1 text-sm text-zinc-600 dark:text-zinc-300">
-                    ถึงวันที่
+                    ถึงวันที่ (ไม่บังคับ)
                     <input
                       type="date"
                       value={exportEndDate}
@@ -332,7 +485,7 @@ export default function Home() {
                 </label>
               </div>
 
-              {exportStartDate && exportEndDate && (
+              {exportLimitValid && (
                 <div className="mt-4 rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2.5 dark:border-zinc-800 dark:bg-zinc-950">
                   {exportSummaryLoading && (
                     <p className="text-sm text-zinc-500 dark:text-zinc-400">กำลังนับจำนวน...</p>
@@ -364,6 +517,27 @@ export default function Home() {
                 </div>
               )}
 
+              <div className="mt-4 flex items-center justify-between gap-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2.5 dark:border-amber-900/60 dark:bg-amber-950/30">
+                <p className="text-xs text-amber-800 dark:text-amber-300">
+                  รายการที่ต้องแก้ทั้งหมดในฐานข้อมูล (ไม่สนตัวกรองด้านบน) — สำหรับประชุม/ส่งทีมแก้ข้อมูล
+                </p>
+                <button
+                  type="button"
+                  disabled={anyDownloadBusy}
+                  onClick={() => startDownload("/api/export/needs-review", "needs_review_all.csv", setReviewDownload)}
+                  className="shrink-0 rounded-lg border border-amber-300 bg-white px-3 py-1.5 text-xs font-medium text-amber-800 transition-colors hover:bg-amber-100 disabled:cursor-wait disabled:opacity-70 dark:border-amber-800 dark:bg-zinc-900 dark:text-amber-300 dark:hover:bg-amber-950"
+                >
+                  <DownloadLabel state={reviewDownload} idle="ดาวน์โหลด .csv" now={now} />
+                </button>
+              </div>
+              {reviewDownload.phase === "error" && (
+                <p className="mt-1.5 text-xs text-red-600 dark:text-red-400">ดาวน์โหลดไม่สำเร็จ: {reviewDownload.message}</p>
+              )}
+
+              {zipDownload.phase === "error" && (
+                <p className="mt-3 text-right text-xs text-red-600 dark:text-red-400">ดาวน์โหลดไม่สำเร็จ: {zipDownload.message}</p>
+              )}
+
               <div className="mt-5 flex justify-end gap-2">
                 <button
                   onClick={() => setExportOpen(false)}
@@ -371,18 +545,19 @@ export default function Home() {
                 >
                   ยกเลิก
                 </button>
-                {exportStartDate && exportEndDate ? (
-                  <a
-                    href={`/api/export?startDate=${exportStartDate}&endDate=${exportEndDate}${exportTier ? `&tier=${exportTier}` : ""}`}
-                    onClick={() => setExportOpen(false)}
-                    className="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white shadow-sm transition-colors hover:bg-indigo-700"
+                {exportLimitValid ? (
+                  <button
+                    type="button"
+                    disabled={anyDownloadBusy}
+                    onClick={() => startDownload(`/api/export?${exportQuery}`, "primo_export.zip", setZipDownload)}
+                    className="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white shadow-sm transition-colors hover:bg-indigo-700 disabled:cursor-wait disabled:opacity-80"
                   >
-                    ดาวน์โหลด .zip
-                  </a>
+                    <DownloadLabel state={zipDownload} idle="ดาวน์โหลด .zip" now={now} />
+                  </button>
                 ) : (
                   <span
                     className="cursor-not-allowed rounded-lg bg-zinc-200 px-4 py-2 text-sm font-medium text-zinc-400 dark:bg-zinc-800 dark:text-zinc-600"
-                    title="เลือกวันที่เริ่มและถึงวันที่ก่อน"
+                    title="จำนวนคนไม่ถูกต้อง"
                   >
                     ดาวน์โหลด .zip
                   </span>
@@ -456,7 +631,7 @@ export default function Home() {
             <table className="min-w-full divide-y divide-zinc-200 text-sm dark:divide-zinc-800">
               <thead className="bg-zinc-50 dark:bg-zinc-950">
                 <tr>
-                  {["Member", "Contact", "Tier", "Gender", "Birth date", "Address", "Created"].map(
+                  {["Member", "Contact", "Tier", "Gender", "Birth date", "Address", "Register date"].map(
                     (col) => (
                       <th
                         key={col}

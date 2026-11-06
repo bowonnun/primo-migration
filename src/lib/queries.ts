@@ -7,6 +7,7 @@ const BASE_SELECT = `
   m.gender, m.date_of_birth, m.register_date, m.active_status, m.created_at,
   m.tier_code, m.tier_type, m.tier_start_date,
   m.line_uid, m.line_display_name, m.line_image_url,
+  m.source_name,
   ma.address_no, ma.alley, ma.street, ma.moo, ma.village,
   ma.address_detail, ma.zipcode AS address_zipcode,
   ma.province_name_th, ma.district_name_th, ma.sub_district_name_th
@@ -100,8 +101,17 @@ export function listMembers({ page, pageSize, ...filters }: ListMembersParams): 
   return { rows, total: count, page, pageSize };
 }
 
-/** No pagination — pulls every matching row for a one-shot export. */
-export function listMembersForExport(filters: CommonFilterParams): MemberJoinRow[] {
+export type ExportOrder = "asc" | "desc";
+
+export interface ExportMembersParams extends CommonFilterParams {
+  /** Max rows to return. Omit for every matching row. */
+  limit?: number;
+  /** By register_date: "asc" = earliest registrants first (default), "desc" = most recent first. */
+  order?: ExportOrder;
+}
+
+/** No pagination — pulls matching rows (optionally capped by `limit`) for a one-shot export. */
+export function listMembersForExport({ limit, order = "asc", ...filters }: ExportMembersParams): MemberJoinRow[] {
   const db = getDb();
   const { conditions, params } = buildConditions(filters);
   const whereClause = conditions.length ? `WHERE ${conditions.join(" AND ")}` : "";
@@ -110,7 +120,9 @@ export function listMembersForExport(filters: CommonFilterParams): MemberJoinRow
     SELECT ${BASE_SELECT}
     ${BASE_FROM}
     ${whereClause}
-    ORDER BY m.register_date ASC
+    -- Members with no register_date always go last, whichever direction is picked.
+    ORDER BY (m.register_date IS NULL OR m.register_date = ''), m.register_date ${order === "desc" ? "DESC" : "ASC"}, m.id
+    ${limit ? "LIMIT @limit" : ""}
   `);
-  return rowsStmt.all(params) as MemberJoinRow[];
+  return rowsStmt.all(limit ? { ...params, limit } : params) as MemberJoinRow[];
 }

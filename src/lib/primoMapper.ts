@@ -21,6 +21,7 @@ export interface MemberJoinRow {
   line_uid: string | null;
   line_display_name: string | null;
   line_image_url: string | null;
+  source_name: string | null;
   address_no: string | null;
   alley: string | null;
   street: string | null;
