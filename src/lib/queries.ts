@@ -10,7 +10,8 @@ const BASE_SELECT = `
   m.source_name,
   ma.address_no, ma.alley, ma.street, ma.moo, ma.village,
   ma.address_detail, ma.zipcode AS address_zipcode,
-  ma.province_name_th, ma.district_name_th, ma.sub_district_name_th
+  ma.province_name_th, ma.district_name_th, ma.sub_district_name_th,
+  mp.point_balance, mp.expiring_point, mp.expiration_date AS point_expiration_date
 `;
 
 const BASE_FROM = `
@@ -30,6 +31,8 @@ const BASE_FROM = `
       WHERE member_id = m.id AND active_status = 1
       LIMIT 1
     )
+  -- member_point is keyed by member_id, so this stays 1:1.
+  LEFT JOIN member_point mp ON mp.member_id = m.id
 `;
 
 interface CommonFilterParams {
@@ -69,8 +72,11 @@ export interface ListMembersParams extends CommonFilterParams {
   pageSize: number;
 }
 
+/** Kept as an alias: the list view and export now share the same joined row. */
+export type MemberListRow = MemberJoinRow;
+
 export interface ListMembersResult {
-  rows: MemberJoinRow[];
+  rows: MemberListRow[];
   total: number;
   page: number;
   pageSize: number;
@@ -96,7 +102,7 @@ export function listMembers({ page, pageSize, ...filters }: ListMembersParams): 
     ORDER BY m.created_at DESC
     LIMIT @limit OFFSET @offset
   `);
-  const rows = rowsStmt.all({ ...params, limit: pageSize, offset }) as MemberJoinRow[];
+  const rows = rowsStmt.all({ ...params, limit: pageSize, offset }) as MemberListRow[];
 
   return { rows, total: count, page, pageSize };
 }

@@ -24,6 +24,9 @@ interface PreviewRecord {
   zipcode: string;
   createdDate: string;
   lineImageUrl: string | null;
+  pointBalance: number | null;
+  expiringPoint: number | null;
+  pointExpirationDate: string;
 }
 
 interface Pagination {
@@ -262,6 +265,10 @@ export default function Home() {
   const [exportLimit, setExportLimit] = useState("");
   // Which end of the register_date timeline to take from: earliest registrants or most recent.
   const [exportOrder, setExportOrder] = useState<"asc" | "desc">("desc");
+  // tier_entry_date for every row of the PRIMO file (one date per file, to be agreed with PRIMO).
+  const [exportTierEntryDate, setExportTierEntryDate] = useState(() =>
+    new Date(Date.now() + 7 * 60 * 60 * 1000).toISOString().slice(0, 10)
+  );
   const exportLimitValid = exportLimit === "" || (/^\d+$/.test(exportLimit) && Number(exportLimit) > 0);
   const [exportSummary, setExportSummary] = useState<{ total: number; valid: number; needsReview: number } | null>(
     null
@@ -483,6 +490,18 @@ export default function Home() {
                     ))}
                   </select>
                 </label>
+
+                <label className="flex flex-col gap-1 text-sm text-zinc-600 dark:text-zinc-300">
+                  tier_entry_date (ใช้วันเดียวกันทั้งไฟล์)
+                  <input
+                    type="date"
+                    required
+                    value={exportTierEntryDate}
+                    onChange={(e) => setExportTierEntryDate(e.target.value)}
+                    className="w-full rounded-lg border border-zinc-300 bg-white px-2.5 py-1.5 text-sm dark:border-zinc-700 dark:bg-zinc-950 [color-scheme:light] dark:[color-scheme:dark]"
+                  />
+                  <span className="text-xs text-zinc-400 dark:text-zinc-500">วันที่จริงรอตกลงกับ PRIMO (อาจเป็นวัน Migrate)</span>
+                </label>
               </div>
 
               {exportLimitValid && (
@@ -549,7 +568,7 @@ export default function Home() {
                   <button
                     type="button"
                     disabled={anyDownloadBusy}
-                    onClick={() => startDownload(`/api/export?${exportQuery}`, "primo_export.zip", setZipDownload)}
+                    onClick={() => startDownload(`/api/export?${exportQuery}&tierEntryDate=${exportTierEntryDate}`, "primo_export.zip", setZipDownload)}
                     className="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white shadow-sm transition-colors hover:bg-indigo-700 disabled:cursor-wait disabled:opacity-80"
                   >
                     <DownloadLabel state={zipDownload} idle="ดาวน์โหลด .zip" now={now} />
@@ -631,11 +650,11 @@ export default function Home() {
             <table className="min-w-full divide-y divide-zinc-200 text-sm dark:divide-zinc-800">
               <thead className="bg-zinc-50 dark:bg-zinc-950">
                 <tr>
-                  {["Member", "Contact", "Tier", "Gender", "Birth date", "Address", "Register date"].map(
+                  {["Member", "Contact", "Tier", "Gender", "Birth date", "Address", "Register date", "Points"].map(
                     (col) => (
                       <th
                         key={col}
-                        className="whitespace-nowrap px-4 py-2.5 text-left text-xs font-semibold uppercase tracking-wide text-zinc-500 dark:text-zinc-400"
+                        className={`whitespace-nowrap px-4 py-2.5 text-xs font-semibold uppercase tracking-wide text-zinc-500 dark:text-zinc-400 ${col === "Points" ? "text-right" : "text-left"}`}
                       >
                         {col}
                       </th>
@@ -646,7 +665,7 @@ export default function Home() {
               <tbody className="divide-y divide-zinc-100 dark:divide-zinc-800">
                 {loading && (
                   <tr>
-                    <td colSpan={7} className="px-4 py-10 text-center text-zinc-400">
+                    <td colSpan={8} className="px-4 py-10 text-center text-zinc-400">
                       กำลังโหลด...
                     </td>
                   </tr>
@@ -654,7 +673,7 @@ export default function Home() {
 
                 {!loading && result?.data.length === 0 && (
                   <tr>
-                    <td colSpan={7} className="px-4 py-10 text-center text-zinc-400">
+                    <td colSpan={8} className="px-4 py-10 text-center text-zinc-400">
                       ไม่มีข้อมูล
                     </td>
                   </tr>
@@ -697,6 +716,27 @@ export default function Home() {
                       </td>
                       <td className="whitespace-nowrap px-4 py-2.5 text-zinc-700 dark:text-zinc-300">
                         {m.createdDate || "—"}
+                      </td>
+                      <td className="whitespace-nowrap px-4 py-2.5 text-right">
+                        {m.pointBalance === null ? (
+                          <span className="text-zinc-400" title="ยังไม่มีข้อมูล point">—</span>
+                        ) : (
+                          <>
+                            <div
+                              className={`font-medium tabular-nums ${
+                                m.pointBalance < 0 ? "text-red-600 dark:text-red-400" : "text-zinc-900 dark:text-zinc-100"
+                              }`}
+                            >
+                              {m.pointBalance.toLocaleString()}
+                            </div>
+                            {!!m.expiringPoint && (
+                              <div className="text-xs text-zinc-400">
+                                หมดอายุ {m.expiringPoint.toLocaleString()}
+                                {m.pointExpirationDate && ` · ${dateOnly(m.pointExpirationDate)}`}
+                              </div>
+                            )}
+                          </>
+                        )}
                       </td>
                     </tr>
                   ))}

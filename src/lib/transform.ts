@@ -34,6 +34,24 @@ export function formatPrimoDate(raw: string | null | undefined): string {
   return `${day}/${month}/${year} ${time ?? "00:00"}`;
 }
 
+/**
+ * PRIMO DateTime format 'YYYY-MM-DD HH:MM:SS' for a date-only value, with a fixed
+ * time of day (PRIMO feedback, Rehearsal 1: birth_date → 07:00:00, tier_entry_date → 00:00:00).
+ * Any time part in the input is dropped. Empty/invalid input returns "".
+ */
+export function formatPrimoDateTime(raw: string | null | undefined, time: string): string {
+  if (!raw) return "";
+  const match = raw.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (!match) return "";
+  const [, year, month, day] = match;
+  return `${year}-${month}-${day} ${time}`;
+}
+
+/** Today's date in Thailand (ICT, +7) as 'YYYY-MM-DD'. */
+export function todayIct(): string {
+  return new Date(Date.now() + 7 * 60 * 60 * 1000).toISOString().slice(0, 10);
+}
+
 export function buildDisplayName(
   lineDisplayName: string | null | undefined,
   firstName: string | null | undefined,

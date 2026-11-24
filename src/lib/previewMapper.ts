@@ -1,4 +1,4 @@
-import type { MemberJoinRow } from "./primoMapper";
+import type { MemberListRow } from "./queries";
 import { lookupTier } from "./tierMapping";
 import { buildDisplayName, formatPhoneNo, formatPrimoDate, isThaiText, lookupGender } from "./transform";
 
@@ -32,9 +32,13 @@ export interface PreviewRecord {
   zipcode: string;
   createdDate: string;
   lineImageUrl: string | null;
+  /** null = no row in member_point (points not fetched for this member yet). */
+  pointBalance: number | null;
+  expiringPoint: number | null;
+  pointExpirationDate: string;
 }
 
-export function toPreviewRecord(row: MemberJoinRow): PreviewRecord {
+export function toPreviewRecord(row: MemberListRow): PreviewRecord {
   const tier = lookupTier(row.tier_code);
   const gender = lookupGender(row.gender);
   const firstIsThai = isThaiText(row.first_name);
@@ -68,5 +72,9 @@ export function toPreviewRecord(row: MemberJoinRow): PreviewRecord {
 
     createdDate: formatPrimoDate(row.register_date),
     lineImageUrl: row.line_image_url,
+
+    pointBalance: row.point_balance,
+    expiringPoint: row.expiring_point,
+    pointExpirationDate: formatPrimoDate(row.point_expiration_date),
   };
 }

@@ -5,6 +5,7 @@ import { classifyForExport, NEEDS_REVIEW_HEADERS } from "@/lib/exportClassify";
 import type { PrimoRecord } from "@/lib/primoMapper";
 import { parseExportParams } from "@/lib/exportParams";
 import { listMembersForExport } from "@/lib/queries";
+import { todayIct } from "@/lib/transform";
 
 const PRIMO_TEMPLATE_HEADERS: (keyof PrimoRecord & string)[] = [
   "province_id",
@@ -49,6 +50,8 @@ const PRIMO_TEMPLATE_HEADERS: (keyof PrimoRecord & string)[] = [
   "consent_term_version",
   "consent_commu_version",
   "updated_status",
+  "point_id",
+  "current_point",
 ];
 
 export async function GET(request: NextRequest) {
@@ -58,9 +61,15 @@ export async function GET(request: NextRequest) {
   }
   const { startDate, endDate, limit, order } = parsed.params;
 
+  // One tier_entry_date for the whole file (PRIMO feedback) — defaults to today (ICT).
+  const tierEntryDate = request.nextUrl.searchParams.get("tierEntryDate") || todayIct();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(tierEntryDate)) {
+    return NextResponse.json({ error: "tierEntryDate must be formatted YYYY-MM-DD" }, { status: 400 });
+  }
+
   try {
     const rows = listMembersForExport(parsed.params);
-    const { validRecords, needsReview } = classifyForExport(rows);
+    const { validRecords, needsReview } = classifyForExport(rows, { tierEntryDate });
 
     const validCsv = toCsv(PRIMO_TEMPLATE_HEADERS, validRecords);
     const needsReviewCsv = toCsv(NEEDS_REVIEW_HEADERS, needsReview);
