@@ -13,7 +13,7 @@ export async function GET(request: NextRequest) {
 
   try {
     const rows = listMembersForExport({ activeOnly });
-    const { total, needsReview } = classifyForExport(rows);
+    const { total, needsReview } = classifyForExport(rows, { activeOnly });
     const csv = new TextEncoder().encode(toCsv(NEEDS_REVIEW_HEADERS, needsReview));
     const today = new Date().toISOString().slice(0, 10);
 

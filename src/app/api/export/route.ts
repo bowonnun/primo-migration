@@ -69,7 +69,7 @@ export async function GET(request: NextRequest) {
 
   try {
     const rows = listMembersForExport(parsed.params);
-    const { validRecords, needsReview } = classifyForExport(rows, { tierEntryDate });
+    const { validRecords, needsReview } = classifyForExport(rows, { tierEntryDate, activeOnly: parsed.params.activeOnly });
 
     const validCsv = toCsv(PRIMO_TEMPLATE_HEADERS, validRecords);
     const needsReviewCsv = toCsv(NEEDS_REVIEW_HEADERS, needsReview);

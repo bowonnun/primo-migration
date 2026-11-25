@@ -1,8 +1,9 @@
 import { toPrimoRecord, type MemberJoinRow, type PrimoRecord, type PrimoRecordOptions } from "./primoMapper";
+import { findEmailPartners, findPhonePartners, normalizeEmail, normalizePhone } from "./duplicateContacts";
 import { buildDisplayName } from "./transform";
 
 /** Machine-readable reason, for filtering / splitting work in Excel. */
-export type ReviewReasonCode = "TIER_NOT_FOUND" | "ADDRESS_MISMATCH";
+export type ReviewReasonCode = "DUPLICATE_PHONE" | "DUPLICATE_EMAIL" | "TIER_NOT_FOUND" | "ADDRESS_MISMATCH";
 
 /**
  * One row of needs_review.csv — meant to be handed to the team that cleans the
@@ -14,6 +15,8 @@ export interface NeedsReviewRow {
   reason_code: string;
   reason: string;
   cus_ref: string;
+  /** cus_ref of the other members sharing this member's phone/email, joined with "|". */
+  related_cus_ref: string;
   first_name: string;
   last_name: string;
   display_name: string;
@@ -35,6 +38,7 @@ export const NEEDS_REVIEW_HEADERS: (keyof NeedsReviewRow & string)[] = [
   "reason_code",
   "reason",
   "cus_ref",
+  "related_cus_ref",
   "first_name",
   "last_name",
   "display_name",
@@ -52,6 +56,11 @@ export const NEEDS_REVIEW_HEADERS: (keyof NeedsReviewRow & string)[] = [
   "zipcode",
 ];
 
+export interface ClassifyOptions extends PrimoRecordOptions {
+  /** Which members the duplicate phone/email check compares against. Defaults to active only, like the export. */
+  activeOnly?: boolean;
+}
+
 export interface ExportClassification {
   total: number;
   validRecords: PrimoRecord[];
@@ -62,21 +71,37 @@ export interface ExportClassification {
  * Splits joined member rows into records ready for PRIMO's template vs
  * records that need a human to look at them first:
  *
+ * - DUPLICATE_PHONE / DUPLICATE_EMAIL: another member anywhere in the DB has the
+ *   same phone_no / email (PRIMO requires both to be unique). Checked against the
+ *   whole DB, so pairs split across export runs are still caught; every member of
+ *   the group goes to review, so the team decides which one keeps the value.
+ *
  * Duplicate LINE UIDs are no longer flagged: PRIMO asked for line_mid to be left
  * blank (it links LINE itself on first login), so they can't conflict on import.
  * - TIER_NOT_FOUND: tier_code doesn't resolve against the tier master data
  * - ADDRESS_MISMATCH: an address value was supplied but doesn't match PRIMO's
  *   master data (a blank field correctly falls back silently, see addressLookup.ts)
  */
-export function classifyForExport(rows: MemberJoinRow[], options: PrimoRecordOptions = {}): ExportClassification {
+export function classifyForExport(rows: MemberJoinRow[], options: ClassifyOptions = {}): ExportClassification {
+  const { activeOnly = true, ...recordOptions } = options;
   const validRecords: PrimoRecord[] = [];
-  const needsReview: NeedsReviewRow[] = [];
+  const needsReview: (NeedsReviewRow & { _groupKey: string })[] = [];
 
   for (const row of rows) {
-    const record = toPrimoRecord(row, options);
+    const record = toPrimoRecord(row, recordOptions);
+    const phonePartners = findPhonePartners(row.phone_no, row.member_code, activeOnly);
+    const emailPartners = findEmailPartners(row.email, row.member_code, activeOnly);
 
     const codes: ReviewReasonCode[] = [];
     const reasons: string[] = [];
+    if (phonePartners.length) {
+      codes.push("DUPLICATE_PHONE");
+      reasons.push(`เบอร์โทร ${record.phone_no} ซ้ำกับ ${phonePartners.join(", ")}`);
+    }
+    if (emailPartners.length) {
+      codes.push("DUPLICATE_EMAIL");
+      reasons.push(`อีเมล ${row.email ?? ""} ซ้ำกับ ${emailPartners.join(", ")}`);
+    }
     if (!record._tierMapped) {
       codes.push("TIER_NOT_FOUND");
       reasons.push(`tier_code "${row.tier_code ?? ""}" ไม่มีใน tier master data`);
@@ -95,6 +120,7 @@ export function classifyForExport(rows: MemberJoinRow[], options: PrimoRecordOpt
       reason_code: codes.join("|"),
       reason: reasons.join("; "),
       cus_ref: row.member_code ?? "",
+      related_cus_ref: [...new Set([...phonePartners, ...emailPartners])].join("|"),
       first_name: row.first_name ?? "",
       last_name: row.last_name ?? "",
       display_name: buildDisplayName(row.line_display_name, row.first_name, row.last_name),
@@ -110,17 +136,28 @@ export function classifyForExport(rows: MemberJoinRow[], options: PrimoRecordOpt
       district_name_th: row.district_name_th ?? "",
       sub_district_name_th: row.sub_district_name_th ?? "",
       zipcode: row.address_zipcode ? String(row.address_zipcode) : "",
+      // Members of the same duplicate group sort next to each other, duplicates first.
+      _groupKey: phonePartners.length
+        ? `0|${normalizePhone(row.phone_no)}`
+        : emailPartners.length
+          ? `1|${normalizeEmail(row.email)}`
+          : "2|",
     });
   }
 
   needsReview.sort(
     (a, b) =>
-      a.register_date.localeCompare(b.register_date) || a.cus_ref.localeCompare(b.cus_ref)
+      a._groupKey.localeCompare(b._groupKey) ||
+      a.register_date.localeCompare(b.register_date) ||
+      a.cus_ref.localeCompare(b.cus_ref)
   );
 
   return {
     total: rows.length,
     validRecords,
-    needsReview,
+    needsReview: needsReview.map(({ _groupKey, ...rest }) => {
+      void _groupKey;
+      return rest;
+    }),
   };
 }

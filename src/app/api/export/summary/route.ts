@@ -11,7 +11,7 @@ export async function GET(request: NextRequest) {
 
   try {
     const rows = listMembersForExport(parsed.params);
-    const { total, validRecords, needsReview } = classifyForExport(rows);
+    const { total, validRecords, needsReview } = classifyForExport(rows, { activeOnly: parsed.params.activeOnly });
 
     return NextResponse.json({
       total,
