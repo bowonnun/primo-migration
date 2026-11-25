@@ -104,8 +104,10 @@ export interface PrimoRecordOptions {
 
 /**
  * Field rules from PRIMO's Rehearsal 1 feedback (18/11/2026):
- * - line_mid, address_freetext, display_name, cus_ref, created_date, updated_date
- *   are always blank (PRIMO fills/links them itself; sending them can conflict)
+ * - line_mid, address_freetext, display_name, created_date, updated_date are always
+ *   blank (PRIMO fills/links them itself; sending them can conflict)
+ * - cus_ref is the KMKM member_code (KMKM decision after the meeting, overriding
+ *   PRIMO's "leave blank" — lets both sides trace a record back to the CRM)
  * - occupation_description is "-" (occupation_id stays 6)
  * - birth_date is 'YYYY-MM-DD 07:00:00'; tier_entry_date is 'YYYY-MM-DD 00:00:00'
  * - point_id is 1 and current_point is member_point.point_balance as-is (negative
@@ -174,7 +176,7 @@ export function toPrimoRecord(row: MemberJoinRow, options: PrimoRecordOptions = 
     display_name: "",
 
     group_id: 1,
-    cus_ref: "",
+    cus_ref: row.member_code ?? "",
     username: row.email ?? "",
 
     tier_entry_date: formatPrimoDateTime(tierEntryDate, "00:00:00"),

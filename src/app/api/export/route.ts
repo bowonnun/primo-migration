@@ -6,6 +6,7 @@ import type { PrimoRecord } from "@/lib/primoMapper";
 import { parseExportParams } from "@/lib/exportParams";
 import { listMembersForExport } from "@/lib/queries";
 import { todayIct } from "@/lib/transform";
+import { toXlsx } from "@/lib/xlsx";
 
 const PRIMO_TEMPLATE_HEADERS: (keyof PrimoRecord & string)[] = [
   "province_id",
@@ -79,6 +80,10 @@ export async function GET(request: NextRequest) {
     const zip = new JSZip();
     zip.file(`primo_export_${suffix}.csv`, validCsv);
     zip.file(`needs_review_${suffix}.csv`, needsReviewCsv);
+    // Same data as .xlsx with text cells: Excel / Google Sheets keep the leading
+    // zeros of phone_no and zipcode, which they strip when opening the CSV.
+    zip.file(`primo_export_${suffix}.xlsx`, await toXlsx(PRIMO_TEMPLATE_HEADERS, validRecords, "primo_export"));
+    zip.file(`needs_review_${suffix}.xlsx`, await toXlsx(NEEDS_REVIEW_HEADERS, needsReview, "needs_review"));
     const zipBuffer = await zip.generateAsync({ type: "nodebuffer" });
 
     return new NextResponse(new Uint8Array(zipBuffer), {
