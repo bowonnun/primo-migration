@@ -1,6 +1,6 @@
 import { lookupAddress } from "./addressLookup";
 import { lookupTier } from "./tierMapping";
-import { formatPhoneNo, formatPrimoDateTime, isThaiText, lookupGender, todayIct } from "./transform";
+import { cleanName, formatPhoneNo, formatPrimoDateTime, isThaiText, lookupGender, todayIct } from "./transform";
 
 /** Shape of one row from the members/member_tier/member_address JOIN query (see src/lib/queries.ts). */
 export interface MemberJoinRow {
@@ -122,8 +122,10 @@ export function toPrimoRecord(row: MemberJoinRow, options: PrimoRecordOptions = 
 
   const tier = lookupTier(row.tier_code);
   const gender = lookupGender(row.gender);
-  const firstIsThai = isThaiText(row.first_name);
-  const lastIsThai = isThaiText(row.last_name);
+  const firstName = cleanName(row.first_name);
+  const lastName = cleanName(row.last_name);
+  const firstIsThai = isThaiText(firstName);
+  const lastIsThai = isThaiText(lastName);
 
   return {
     province_id: address.provinceId,
@@ -136,10 +138,10 @@ export function toPrimoRecord(row: MemberJoinRow, options: PrimoRecordOptions = 
 
     line_mid: "",
 
-    firstname_th: firstIsThai ? row.first_name ?? "" : "",
-    lastname_th: lastIsThai ? row.last_name ?? "" : "",
-    firstname_en: !firstIsThai ? row.first_name ?? "" : "",
-    lastname_en: !lastIsThai ? row.last_name ?? "" : "",
+    firstname_th: firstIsThai ? firstName : "",
+    lastname_th: lastIsThai ? lastName : "",
+    firstname_en: !firstIsThai ? firstName : "",
+    lastname_en: !lastIsThai ? lastName : "",
 
     address_no: row.address_no ?? "",
     room_no: "",

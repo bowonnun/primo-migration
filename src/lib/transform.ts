@@ -5,6 +5,22 @@ export function isThaiText(text: string | null | undefined): boolean {
   return THAI_CHAR.test(text);
 }
 
+/** Zero-width spaces/joiners, LRM/RLM, bidi embeddings/isolates, word joiner, BOM. */
+const INVISIBLE_CHARS = /[​-‏‪-‮⁠-⁤⁦-⁩﻿]/g;
+
+/**
+ * Cleans a person's name for PRIMO (Rehearsal 1 feedback 6/6):
+ * - drops invisible characters (e.g. a trailing zero-width space in "Atiporn")
+ * - for non-Thai names, NFKC-folds decorative Unicode letters back to plain ones
+ *   ("𝘕𝘢𝘵𝘵𝘢𝘱𝘰𝘯𝘨" → "Nattapong"). Chinese/Japanese/Korean names are left as they are.
+ * Thai names skip NFKC: it would split SARA AM (ำ) into two characters.
+ */
+export function cleanName(raw: string | null | undefined): string {
+  if (!raw) return "";
+  const visible = raw.replace(INVISIBLE_CHARS, "");
+  return (isThaiText(visible) ? visible : visible.normalize("NFKC")).trim();
+}
+
 /**
  * Normalizes a CRM phone number to digits-only, leading zero restored.
  * Handles Float-sourced values (e.g. "812345678.0" or "812345678") that lost their
